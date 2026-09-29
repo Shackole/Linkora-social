@@ -115,6 +115,17 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for how to set up your environment, bra
 
 ---
 
+## Troubleshooting
+
+| Problem                                             | Fix                                                                     |
+| --------------------------------------------------- | ----------------------------------------------------------------------- |
+| `pnpm: command not found`                           | `npm install -g pnpm`                                                   |
+| `cargo: command not found`                          | `curl https://sh.rustup.rs -sSf \| sh && source $HOME/.cargo/env`       |
+| `cargo test` fails with "no such file or directory" | Run from the contracts directory: `cd packages/contracts && cargo test` |
+| `stellar: command not found`                        | `cargo install --locked stellar-cli --features opt`                     |
+
+---
+
 ## License
 
 [MIT](./LICENSE)

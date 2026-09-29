@@ -1,9 +1,187 @@
 # Linkora API Reference
 
-> **Scope note.** This document currently covers **HTTP request authentication** for the
-> indexer's REST API. The Soroban contract function reference, storage layout, and event
-> schema are not here yet — see `packages/contracts` and the README API table in the
-> meantime.
+---
+
+## Contract Function Quick-Reference
+
+The tables below list every public function on `LinkoraContract` grouped by module. Auth requirements use the following shorthand:
+
+- **caller** — the first `Address` argument calls `require_auth()` on itself.
+- **Admin role** — caller must hold the `Admin` role granted via `grant_role`.
+- **Upgrader role** — caller must hold the `Upgrader` role.
+- **Moderator role** — caller must hold the `Moderator` role.
+- **Multi-sig** — a `Vec<Address>` of signers all call `require_auth()`; must meet the pool's approval threshold.
+- **none** — read-only; no auth required.
+
+---
+
+### Initialisation & Access Control
+
+| Function      | Auth             | Inputs                                                | Returns |
+| ------------- | ---------------- | ----------------------------------------------------- | ------- |
+| `initialize`  | caller (`admin`) | `admin: Address`, `treasury: Address`, `fee_bps: u32` | `()`    |
+| `grant_role`  | Admin role       | `admin: Address`, `account: Address`, `role: Role`    | `()`    |
+| `revoke_role` | Admin role       | `admin: Address`, `account: Address`, `role: Role`    | `()`    |
+| `has_role`    | none             | `account: Address`, `role: Role`                      | `bool`  |
+
+---
+
+### Social — Profiles
+
+| Function                  | Auth            | Inputs                                                        | Returns           |
+| ------------------------- | --------------- | ------------------------------------------------------------- | ----------------- |
+| `set_profile`             | caller (`user`) | `user: Address`, `username: String`, `creator_token: Address` | `()`              |
+| `get_profile`             | none            | `user: Address`                                               | `Option<Profile>` |
+| `get_profile_count`       | none            | —                                                             | `u64`             |
+| `delete_profile`          | caller (`user`) | `user: Address`                                               | `()`              |
+| `batch_cleanup_profile`   | none            | `user: Address`, `max_entries: u32`                           | `()`              |
+| `get_address_by_username` | none            | `username: String`                                            | `Option<Address>` |
+
+---
+
+### Social — Follow Graph
+
+| Function               | Auth                | Inputs                                         | Returns        |
+| ---------------------- | ------------------- | ---------------------------------------------- | -------------- |
+| `follow`               | caller (`follower`) | `follower: Address`, `followee: Address`       | `()`           |
+| `unfollow`             | caller (`follower`) | `follower: Address`, `followee: Address`       | `()`           |
+| `get_following`        | none                | `user: Address`, `offset: u32`, `limit: u32`   | `Vec<Address>` |
+| `get_followers`        | none                | `user: Address`, `offset: u32`, `limit: u32`   | `Vec<Address>` |
+| `batch_follow`         | caller (`follower`) | `follower: Address`, `followees: Vec<Address>` | `()`           |
+| `batch_unfollow`       | caller (`follower`) | `follower: Address`, `followees: Vec<Address>` | `()`           |
+| `migrate_follow_graph` | Admin role          | `admin: Address`, `users: Vec<Address>`        | `()`           |
+| `block_user`           | caller (`blocker`)  | `blocker: Address`, `blocked: Address`         | `()`           |
+| `unblock_user`         | caller (`blocker`)  | `blocker: Address`, `blocked: Address`         | `()`           |
+| `is_blocked`           | none                | `blocker: Address`, `blocked: Address`         | `bool`         |
+
+---
+
+### Posts
+
+| Function              | Auth              | Inputs                                                              | Returns         |
+| --------------------- | ----------------- | ------------------------------------------------------------------- | --------------- |
+| `create_post`         | caller (`author`) | `author: Address`, `content: String`                                | `u64` (post ID) |
+| `get_post`            | none              | `id: u64`                                                           | `Option<Post>`  |
+| `get_post_count`      | none              | —                                                                   | `u64`           |
+| `delete_post`         | caller (`author`) | `author: Address`, `post_id: u64`                                   | `()`            |
+| `batch_cleanup_post`  | none              | `post_id: u64`, `max_entries: u32`                                  | `()`            |
+| `get_posts_by_author` | none              | `author: Address`, `offset: u32`, `limit: u32`                      | `Vec<u64>`      |
+| `like_post`           | caller (`user`)   | `user: Address`, `post_id: u64`                                     | `()`            |
+| `batch_like`          | caller (`user`)   | `user: Address`, `post_ids: Vec<u64>`                               | `()`            |
+| `get_like_count`      | none              | `post_id: u64`                                                      | `u64`           |
+| `has_liked`           | none              | `user: Address`, `post_id: u64`                                     | `bool`          |
+| `tip`                 | caller (`tipper`) | `tipper: Address`, `post_id: u64`, `token: Address`, `amount: i128` | `()`            |
+
+---
+
+### Pools
+
+| Function                | Auth                  | Inputs                                                                           | Returns                |
+| ----------------------- | --------------------- | -------------------------------------------------------------------------------- | ---------------------- |
+| `create_pool`           | caller (first signer) | `signers: Vec<Address>`, `pool_id: Symbol`, `token: Address`, `threshold: u32`   | `()`                   |
+| `pool_deposit`          | caller (`depositor`)  | `depositor: Address`, `pool_id: Symbol`, `token: Address`, `amount: i128`        | `()`                   |
+| `pool_withdraw`         | Multi-sig             | `signers: Vec<Address>`, `pool_id: Symbol`, `recipient: Address`, `amount: i128` | `()`                   |
+| `get_pool`              | none                  | `pool_id: Symbol`                                                                | `Option<Pool>`         |
+| `get_pool_admins`       | none                  | `pool_id: Symbol`                                                                | `Option<Vec<Address>>` |
+| `add_pool_admin`        | Multi-sig             | `signers: Vec<Address>`, `pool_id: Symbol`, `new_admin: Address`                 | `()`                   |
+| `remove_pool_admin`     | Multi-sig             | `signers: Vec<Address>`, `pool_id: Symbol`, `admin: Address`                     | `()`                   |
+| `update_pool_threshold` | Multi-sig             | `signers: Vec<Address>`, `pool_id: Symbol`, `threshold: u32`                     | `()`                   |
+
+---
+
+### Governance
+
+| Function           | Auth                | Inputs                                                                                                                                   | Returns             |
+| ------------------ | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------- |
+| `gov_init_config`  | Admin role          | `admin: Address`, `quorum: u32`, `time_lock_ledgers: u32`, `vote_window_ledgers: u32`, `quorum_decay_rate_bps: u32`, `quorum_floor: u32` | `()`                |
+| `gov_get_config`   | none                | —                                                                                                                                        | `GovConfig`         |
+| `gov_propose`      | caller (`proposer`) | `proposer: Address`, `parameter: GovParameter`, `new_value: u64`, `new_address: Option<Address>`                                         | `u64` (proposal ID) |
+| `gov_vote`         | caller (`voter`)    | `voter: Address`, `proposal_id: u64`, `support: bool`                                                                                    | `()`                |
+| `effective_quorum` | none                | `proposal_id: u64`                                                                                                                       | `u32`               |
+| `gov_execute`      | Admin role          | `admin: Address`, `proposal_id: u64`                                                                                                     | `()`                |
+| `gov_veto`         | Multi-sig           | `signers: Vec<Address>`, `pool_id: Symbol`, `proposal_id: u64`                                                                           | `()`                |
+| `gov_get_proposal` | none                | `proposal_id: u64`                                                                                                                       | `GovProposal`       |
+
+---
+
+### Analytics Oracle
+
+| Function                       | Auth       | Inputs                                                               | Returns |
+| ------------------------------ | ---------- | -------------------------------------------------------------------- | ------- |
+| `register_oracle`              | Admin role | `admin: Address`, `name: Symbol`, `pubkey: BytesN<32>`               | `()`    |
+| `verify_analytics_attestation` | none       | `oracle_name: Symbol`, `report_cbor: Bytes`, `signature: BytesN<64>` | `()`    |
+
+---
+
+### Moderation
+
+| Function           | Auth                | Inputs                                                                                                 | Returns          |
+| ------------------ | ------------------- | ------------------------------------------------------------------------------------------------------ | ---------------- |
+| `report_post`      | caller (`reporter`) | `reporter: Address`, `post_id: u64`, `token: Address`, `stake_amount: i128`, `reason_hash: BytesN<32>` | `()`             |
+| `review_report`    | Moderator role      | `moderator: Address`, `post_id: u64`, `reporter: Address`, `verdict: ReportStatus`                     | `()`             |
+| `get_report`       | none                | `post_id: u64`, `reporter: Address`                                                                    | `Option<Report>` |
+| `get_report_count` | none                | `post_id: u64`                                                                                         | `u32`            |
+
+---
+
+### Protocol Parameters & Admin
+
+| Function                   | Auth        | Inputs                                    | Returns           |
+| -------------------------- | ----------- | ----------------------------------------- | ----------------- |
+| `set_fee`                  | Admin role  | `admin: Address`, `fee_bps: u32`          | `()`              |
+| `get_fee_bps`              | none        | —                                         | `u32`             |
+| `set_treasury`             | Admin role  | `admin: Address`, `treasury: Address`     | `()`              |
+| `get_treasury`             | none        | —                                         | `Option<Address>` |
+| `set_tip_cooldown_window`  | Admin role  | `admin: Address`, `cooldown_ledgers: u32` | `()`              |
+| `get_tip_cooldown_window`  | none        | —                                         | `u32`             |
+| `set_max_post_content_len` | Admin role  | `admin: Address`, `max_len: u32`          | `()`              |
+| `get_max_post_content_len` | none        | —                                         | `u32`             |
+| `set_max_bio_len`          | Admin role  | `admin: Address`, `max_len: u32`          | `()`              |
+| `get_max_bio_len`          | none        | —                                         | `u32`             |
+| `set_rent_rate_bps`        | Admin role  | `admin: Address`, `rate: u32`             | `()`              |
+| `get_rent_rate_bps`        | none        | —                                         | `u32`             |
+| `pause`                    | Pauser role | `admin: Address`                          | `()`              |
+| `unpause`                  | Pauser role | `admin: Address`                          | `()`              |
+
+---
+
+### Rent & Storage
+
+| Function                | Auth            | Inputs                                            | Returns                 |
+| ----------------------- | --------------- | ------------------------------------------------- | ----------------------- |
+| `pay_rent`              | caller (`user`) | `user: Address`, `token: Address`, `amount: i128` | `()`                    |
+| `get_rent_expiry`       | none            | `user: Address`                                   | `u32` (ledger sequence) |
+| `batch_bump_user_graph` | Admin role      | `admin: Address`, `user: Address`                 | `u32` (keys bumped)     |
+
+---
+
+### Upgrade
+
+| Function             | Auth          | Inputs                                           | Returns         |
+| -------------------- | ------------- | ------------------------------------------------ | --------------- |
+| `propose_upgrade`    | Upgrader role | `upgrader: Address`, `new_wasm_hash: BytesN<32>` | `()`            |
+| `execute_upgrade`    | Upgrader role | `upgrader: Address`                              | `()`            |
+| `upgrade`            | Upgrader role | `upgrader: Address`, `new_wasm_hash: BytesN<32>` | `()`            |
+| `get_contract_state` | none          | —                                                | `ContractState` |
+
+---
+
+### Credentials & DM Keys
+
+| Function                   | Auth                                  | Inputs                                                                                 | Returns              |
+| -------------------------- | ------------------------------------- | -------------------------------------------------------------------------------------- | -------------------- |
+| `set_credential_authority` | Admin role                            | `admin: Address`, `pubkey: BytesN<32>`                                                 | `()`                 |
+| `update_credential_root`   | caller (`user`) + authority signature | `user: Address`, `new_root: BytesN<32>`, `signature: BytesN<64>`                       | `()`                 |
+| `verify_credential`        | none (mutating)                       | `user: Address`, `proof: Vec<BytesN<32>>`, `leaf: BytesN<32>`, `nullifier: BytesN<32>` | `bool`               |
+| `get_credential_root`      | none                                  | `user: Address`                                                                        | `Option<BytesN<32>>` |
+| `publish_dm_key`           | caller (`user`)                       | `user: Address`, `x25519_pubkey: BytesN<32>`                                           | `()`                 |
+| `get_dm_key`               | none                                  | `user: Address`                                                                        | `Option<BytesN<32>>` |
+
+---
+
+> **Scope note.** The HTTP request authentication reference for the indexer REST API
+> continues below. The Soroban storage layout and full event schema are in
+> `packages/contracts/contracts/linkora-contracts/src/lib.rs`.
 
 ---
 
